@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"sort"
 
 	"github.com/mitchellh/go-z3"
 )
@@ -12,23 +13,36 @@ func main() {
 	// players := 9
 	// groups := 12
 
+	ans, err := solve(players, groups)
+	if err == nil {
+		for i := 0; i < groups; i++ {
+			fmt.Println(ans[i])
+		}
+
+	} else {
+		fmt.Println("no solution for", players, groups)
+	}
+
+}
+
+func solve(players, groups int) ([][]int, error) {
+
 	config := z3.NewConfig()
 	ctx := z3.NewContext(config)
 	config.Close()
 	defer ctx.Close()
 
-	// Create the solver
 	s := ctx.NewSolver()
 	defer s.Close()
 
+	// A "true" in position i,j,g means that players i and j play one another as
+	// part of subgroup g
 	state := VarTensor(ctx, players, players, groups)
 
 	// Each possible combination of games must be played in exactly one group
 	for i := 0; i < players; i++ {
 		for j := i + 1; j < players; j++ {
-
 			s.Assert(Unique(state[i][j]...))
-
 		}
 	}
 
@@ -44,12 +58,10 @@ func main() {
 	}
 
 	for u := 0; u < groups; u++ {
-
 		all := []*z3.AST{}
 
 		for i := 0; i < players; i++ {
 			for j := i + 1; j < players; j++ {
-
 				all = append(all, state[i][j][u])
 			}
 		}
@@ -59,32 +71,29 @@ func main() {
 
 		// No group can have no players
 		s.Assert(all[0].Or(all[1:]...))
-
 	}
 
+	// If players i and j play one another in group g and so do j and k, then i
+	// and k must play one another in group g.
 	for i := 0; i < players; i++ {
 		for j := i + 1; j < players; j++ {
 			for a := j + 1; a < players; a++ {
-
 				for x := 0; x < groups; x++ {
-
 					s.Assert(state[i][j][x].And(state[a][j][x]).Implies(state[a][i][x]))
 					s.Assert(state[i][j][x].And(state[a][i][x]).Implies(state[a][j][x]))
 					s.Assert(state[a][i][x].And(state[a][j][x]).Implies(state[i][j][x]))
-
 				}
-
 			}
 		}
 	}
 
+	// If players i and j play one another in group g and so do k and l, then
+	// i,k i,l j,k and j,l must all be played in group g.
 	for i := 0; i < players; i++ {
 		for j := i + 1; j < players; j++ {
 			for a := j + 1; a < players; a++ {
 				for b := a + 1; b < players; b++ {
-
 					for x := 0; x < groups; x++ {
-
 						s.Assert(
 							state[i][j][x].And(state[a][b][x]).Implies(
 								state[i][a][x].And(state[i][b][x], state[j][a][x], state[j][b][x])),
@@ -107,69 +116,18 @@ func main() {
 
 	works := s.Check()
 
-	if works == z3.True {
-		fmt.Println("works")
-	} else {
-		fmt.Println("doesn'twork", works)
+	if works != z3.True {
+		return [][]int{}, fmt.Errorf("no solution")
 	}
 
 	m := s.Model()
 	assignments := m.Assignments()
 	m.Close()
 
-	//		fmt.Println(ans)
-	unwrapped := unwrap(state, assignments)
-
-	for _, x := range unwrapped {
-		for _, y := range x {
-			fmt.Printf(" %2d ", y)
-		}
-		fmt.Print("\n")
-	}
-
-	groots := map[int][][2]int{}
-	for i := 0; i < players; i++ {
-		for j := 0; j < players; j++ {
-			if i == j {
-				continue
-			}
-
-			x := unwrapped[i][j]
-			toast := groots[x]
-			groots[x] = append(toast, [2]int{i, j})
-		}
-	}
-	for grow, asdf := range groots {
-		fmt.Println(grow, asdf)
-	}
-	for _, x := range prettify(groots) {
-		fmt.Println(x)
-	}
+	return unwrap(state, assignments), nil
 }
 
-func prettify(x map[int][][2]int) [][]int {
-	ans := make([][]int, len(x))
-	for k, v := range x {
-
-		tmp := map[int]bool{}
-
-		for _, ij := range v {
-			tmp[ij[0]] = true
-			tmp[ij[1]] = true
-		}
-
-		ans[k] = []int{}
-		for z := range tmp {
-
-			ans[k] = append(ans[k], z)
-
-		}
-
-	}
-	return ans
-
-}
-
+// Exactly one of the vars is true
 func Unique(vars ...*z3.AST) *z3.AST {
 	x := vars[0].Or(vars[1:]...)
 
@@ -183,26 +141,40 @@ func Unique(vars ...*z3.AST) *z3.AST {
 }
 
 func unwrap(state [][][]*z3.AST, solved map[string]*z3.AST) [][]int {
-	ans := make([][]int, len(state))
-	for i := 0; i < len(state); i++ {
-		ans[i] = make([]int, len(state))
-		for j := 0; j < len(state); j++ {
-			ans[i][j] = -1
-		}
+	numGroups := len(state[0][0])
+
+	ans := make([][]int, numGroups)
+	groups := map[int]map[int]bool{}
+	for i := 0; i < numGroups; i++ {
+		groups[i] = map[int]bool{}
+		ans[i] = []int{}
 	}
 
 	for i := 0; i < len(state); i++ {
 		for j := 0; j < len(state[i]); j++ {
 			for k := 0; k < len(state[i][j]); k++ {
+				seen := false
+
 				if ants, ok := solved[state[i][j][k].String()]; ok && ants.String() == "true" {
-					if ans[i][j] != -1 {
-						panic("")
+					if seen {
+						panic("should never happen")
 					}
-					ans[i][j] = k
+					seen = true
+					groups[k][i] = true
+					groups[k][j] = true
 				}
 			}
 		}
 	}
+
+	for i, g := range groups {
+		for x := range g {
+			ans[i] = append(ans[i], x)
+		}
+		sort.Ints(ans[i])
+	}
+
+	sort.Slice(ans, func(i, j int) bool { return ans[i][0] < ans[j][0] })
 	return ans
 }
 
