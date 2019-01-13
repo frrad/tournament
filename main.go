@@ -2,16 +2,24 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"sort"
+	"strconv"
 
 	"github.com/mitchellh/go-z3"
 )
 
 func main() {
-	players := 16
-	groups := 22
-	// players := 9
-	// groups := 12
+	playerStr, subgroupsStr := os.Args[1], os.Args[2]
+	players, err := strconv.Atoi(playerStr)
+	if err != nil {
+		panic("can't parse num players")
+	}
+
+	groups, err := strconv.Atoi(subgroupsStr)
+	if err != nil {
+		panic("can't parse num subgroups")
+	}
 
 	ans, err := solve(players, groups)
 	if err == nil {
@@ -38,7 +46,6 @@ func solve(players, groups int) ([][]int, error) {
 	// A "true" in position i,g means that players i is in subgroup g
 	state := VarMatrix(ctx, players, groups)
 
-	// symmetric property
 	for i := 0; i < players; i++ {
 		for j := i + 1; j < players; j++ {
 
@@ -51,6 +58,15 @@ func solve(players, groups int) ([][]int, error) {
 
 			s.Assert(Unique(sgs...))
 		}
+	}
+
+	for u := 0; u < groups; u++ {
+		sgs := []*z3.AST{}
+		for i := 0; i < players; i++ {
+			sgs = append(sgs, state[i][u])
+		}
+		s.Assert(Unique(sgs...).Not())
+		s.Assert(sgs[0].Or(sgs[1:]...))
 	}
 
 	works := s.Check()
@@ -80,7 +96,6 @@ func Unique(vars ...*z3.AST) *z3.AST {
 }
 
 func unwrap(state [][]*z3.AST, solved map[string]*z3.AST) [][]int {
-	fmt.Println(solved)
 
 	numPlayers := len(state)
 	numGroups := len(state[0])
