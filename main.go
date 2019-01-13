@@ -10,6 +10,10 @@ import (
 )
 
 func main() {
+	if len(os.Args) < 3 {
+		panic("must supply num players, subgroups")
+	}
+
 	playerStr, subgroupsStr := os.Args[1], os.Args[2]
 	players, err := strconv.Atoi(playerStr)
 	if err != nil {
@@ -34,7 +38,6 @@ func main() {
 }
 
 func solve(players, groups int) ([][]int, error) {
-
 	config := z3.NewConfig()
 	ctx := z3.NewContext(config)
 	config.Close()
@@ -43,19 +46,15 @@ func solve(players, groups int) ([][]int, error) {
 	s := ctx.NewSolver()
 	defer s.Close()
 
-	// A "true" in position i,g means that players i is in subgroup g
+	// A "true" in position i,g means that players i is a member of subgroup g
 	state := VarMatrix(ctx, players, groups)
 
 	for i := 0; i < players; i++ {
 		for j := i + 1; j < players; j++ {
-
 			sgs := []*z3.AST{}
-
 			for u := 0; u < groups; u++ {
-
 				sgs = append(sgs, state[i][u].And(state[j][u]))
 			}
-
 			s.Assert(Unique(sgs...))
 		}
 	}
@@ -96,26 +95,20 @@ func Unique(vars ...*z3.AST) *z3.AST {
 }
 
 func unwrap(state [][]*z3.AST, solved map[string]*z3.AST) [][]int {
-
 	numPlayers := len(state)
 	numGroups := len(state[0])
 
 	ans := make([][]int, numGroups)
 
 	for i := 0; i < numGroups; i++ {
-
 		ans[i] = []int{}
 	}
 
 	for i := 0; i < numPlayers; i++ {
 		for k := 0; k < numGroups; k++ {
-
 			if ants, ok := solved[state[i][k].String()]; ok && ants.String() == "true" {
-
 				ans[k] = append(ans[k], i)
-
 			}
-
 		}
 	}
 
@@ -130,7 +123,6 @@ func VarMatrix(ctx *z3.Context, a, b int) [][]*z3.AST {
 		stateMat[i] = make([]*z3.AST, b)
 
 		for j := 0; j < b; j++ {
-
 			name := fmt.Sprintf("v-%d-%d", i, j)
 			stateMat[i][j] = ctx.Const(
 				ctx.Symbol(name),
