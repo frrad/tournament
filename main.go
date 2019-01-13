@@ -68,6 +68,16 @@ func solve(players, groups int) ([][]int, error) {
 		s.Assert(sgs[0].Or(sgs[1:]...))
 	}
 
+	for u := 0; u < groups; u++ {
+		sgs := []*z3.AST{}
+		for i := 0; i < players; i++ {
+			for j := i + 1; j < players; j++ {
+				sgs = append(sgs, state[i][u].And(state[j][u]))
+			}
+		}
+		s.Assert(Unique(sgs...).Not())
+	}
+
 	works := s.Check()
 
 	if works != z3.True {
