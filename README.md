@@ -1,3 +1,4 @@
+```
 time go run main.go 
 [0 2 5 8]
 [0 4 6]
@@ -20,3 +21,4 @@ time go run main.go
 [6 8 9 14]
 [10 11 14]
 go run main.go  47.80s user 1.42s system 100% cpu 49.204 total
+```
