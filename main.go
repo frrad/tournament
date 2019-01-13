@@ -9,7 +9,7 @@ import (
 
 func main() {
 	players := 16
-	groups := 20
+	groups := 22
 	// players := 9
 	// groups := 12
 
@@ -35,82 +35,21 @@ func solve(players, groups int) ([][]int, error) {
 	s := ctx.NewSolver()
 	defer s.Close()
 
-	// A "true" in position i,j,g means that players i and j play one another as
-	// part of subgroup g
-	state := VarTensor(ctx, players, players, groups)
-
-	// Each possible combination of games must be played in exactly one group
-	for i := 0; i < players; i++ {
-		for j := i + 1; j < players; j++ {
-			s.Assert(Unique(state[i][j]...))
-		}
-	}
+	// A "true" in position i,g means that players i is in subgroup g
+	state := VarMatrix(ctx, players, groups)
 
 	// symmetric property
 	for i := 0; i < players; i++ {
 		for j := i + 1; j < players; j++ {
+
+			sgs := []*z3.AST{}
+
 			for u := 0; u < groups; u++ {
-				s.Assert(
-					state[i][j][u].Eq(state[j][i][u]),
-				)
+
+				sgs = append(sgs, state[i][u].And(state[j][u]))
 			}
-		}
-	}
 
-	for u := 0; u < groups; u++ {
-		all := []*z3.AST{}
-
-		for i := 0; i < players; i++ {
-			for j := i + 1; j < players; j++ {
-				all = append(all, state[i][j][u])
-			}
-		}
-
-		// No group can have only one game
-		s.Assert(Unique(all...).Not())
-
-		// No group can have no players
-		s.Assert(all[0].Or(all[1:]...))
-	}
-
-	// If players i and j play one another in group g and so do j and k, then i
-	// and k must play one another in group g.
-	for i := 0; i < players; i++ {
-		for j := i + 1; j < players; j++ {
-			for a := j + 1; a < players; a++ {
-				for x := 0; x < groups; x++ {
-					s.Assert(state[i][j][x].And(state[a][j][x]).Implies(state[a][i][x]))
-					s.Assert(state[i][j][x].And(state[a][i][x]).Implies(state[a][j][x]))
-					s.Assert(state[a][i][x].And(state[a][j][x]).Implies(state[i][j][x]))
-				}
-			}
-		}
-	}
-
-	// If players i and j play one another in group g and so do k and l, then
-	// i,k i,l j,k and j,l must all be played in group g.
-	for i := 0; i < players; i++ {
-		for j := i + 1; j < players; j++ {
-			for a := j + 1; a < players; a++ {
-				for b := a + 1; b < players; b++ {
-					for x := 0; x < groups; x++ {
-						s.Assert(
-							state[i][j][x].And(state[a][b][x]).Implies(
-								state[i][a][x].And(state[i][b][x], state[j][a][x], state[j][b][x])),
-						)
-
-						s.Assert(
-							state[i][a][x].And(state[j][b][x]).Implies(
-								state[i][j][x].And(state[i][b][x], state[j][a][x], state[a][b][x])),
-						)
-
-						s.Assert(
-							state[i][b][x].And(state[j][a][x]).Implies(
-								state[i][j][x].And(state[i][a][x], state[j][b][x], state[a][b][x])),
-						)
-					}
-				}
-			}
+			s.Assert(Unique(sgs...))
 		}
 	}
 
@@ -140,61 +79,49 @@ func Unique(vars ...*z3.AST) *z3.AST {
 	return x
 }
 
-func unwrap(state [][][]*z3.AST, solved map[string]*z3.AST) [][]int {
-	numGroups := len(state[0][0])
+func unwrap(state [][]*z3.AST, solved map[string]*z3.AST) [][]int {
+	fmt.Println(solved)
+
+	numPlayers := len(state)
+	numGroups := len(state[0])
 
 	ans := make([][]int, numGroups)
-	groups := map[int]map[int]bool{}
+
 	for i := 0; i < numGroups; i++ {
-		groups[i] = map[int]bool{}
+
 		ans[i] = []int{}
 	}
 
-	for i := 0; i < len(state); i++ {
-		for j := 0; j < len(state[i]); j++ {
-			for k := 0; k < len(state[i][j]); k++ {
-				seen := false
+	for i := 0; i < numPlayers; i++ {
+		for k := 0; k < numGroups; k++ {
 
-				if ants, ok := solved[state[i][j][k].String()]; ok && ants.String() == "true" {
-					if seen {
-						panic("should never happen")
-					}
-					seen = true
-					groups[k][i] = true
-					groups[k][j] = true
-				}
+			if ants, ok := solved[state[i][k].String()]; ok && ants.String() == "true" {
+
+				ans[k] = append(ans[k], i)
+
 			}
-		}
-	}
 
-	for i, g := range groups {
-		for x := range g {
-			ans[i] = append(ans[i], x)
 		}
-		sort.Ints(ans[i])
 	}
 
 	sort.Slice(ans, func(i, j int) bool { return ans[i][0] < ans[j][0] })
 	return ans
 }
 
-func VarTensor(ctx *z3.Context, a, b, c int) [][][]*z3.AST {
-	stateMat := make([][][]*z3.AST, a)
+func VarMatrix(ctx *z3.Context, a, b int) [][]*z3.AST {
+	stateMat := make([][]*z3.AST, a)
 
 	for i := 0; i < a; i++ {
-		stateMat[i] = make([][]*z3.AST, b)
+		stateMat[i] = make([]*z3.AST, b)
 
 		for j := 0; j < b; j++ {
 
-			stateMat[i][j] = make([]*z3.AST, c)
+			name := fmt.Sprintf("v-%d-%d", i, j)
+			stateMat[i][j] = ctx.Const(
+				ctx.Symbol(name),
+				ctx.BoolSort(),
+			)
 
-			for z := 0; z < c; z++ {
-				name := fmt.Sprintf("v-%d-%d-%d", i, j, z)
-				stateMat[i][j][z] = ctx.Const(
-					ctx.Symbol(name),
-					ctx.BoolSort(),
-				)
-			}
 		}
 
 	}
